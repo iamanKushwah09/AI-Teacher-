@@ -1,0 +1,7 @@
+{
+  "name": "Copy of Mimi - The Friendly Teacher",
+  "description": "A voice-only interactive AI teacher designed for children aged 4-10. Mimi asks simple questions and encourages learning through conversation.",
+  "requestFramePermissions": [
+    "microphone"
+  ]
+}
