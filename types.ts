@@ -16,3 +16,9 @@ export interface PcmBlob {
   data: string;
   mimeType: string;
 }
+
+export interface UserProgress {
+  difficulty: string;
+  stars: number;
+  completedTopics: string[];
+}

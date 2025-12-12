@@ -1,37 +1,80 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
-import { GoogleGenAI, LiveServerMessage, Modality } from '@google/genai';
+import { GoogleGenAI, LiveServerMessage, Modality, FunctionDeclaration, Type } from '@google/genai';
 import { ConnectionState } from '../types';
 import { createBlob, decode, decodeAudioData } from '../utils/audio';
+import { playFeedbackSound } from '../utils/soundEffects';
 
-// System instructions to define "Mimi"
-const SYSTEM_INSTRUCTION = `
-You are "Mimi", a friendly, caring AI teacher designed specially for small children (ages 4–10).
-Your job is to communicate ONLY through short, simple, clear spoken sentences.
-You must ALWAYS reply as if you are talking to a young child.
+// Tool definition for reporting correctness
+const evaluationTool: FunctionDeclaration = {
+  name: 'reportEvaluation',
+  description: 'Call this function to report if the child answered correctly or incorrectly, before speaking the response.',
+  parameters: {
+    type: Type.OBJECT,
+    properties: {
+      isCorrect: {
+        type: Type.BOOLEAN,
+        description: 'True if the child answered correctly, False otherwise.',
+      },
+      topic: {
+        type: Type.STRING,
+        description: 'The specific topic (1-2 words) of the question just answered (e.g., "Colors", "Math", "Animals").',
+      },
+    },
+    required: ['isCorrect'],
+  },
+};
 
-RULES:
-1. Only voice-friendly, short sentences (8–15 words).
-2. No difficult vocabulary, no adult topics.
-3. Speak softly, kindly, and encouragingly.
-4. Never mention that you are an AI.
-5. Always praise the child gently, even if the answer is wrong.
-6. If the child gives no answer or seems confused, guide them with a tiny hint.
-7. Always ask the next simple question after answering the child.
-8. No text formatting, no emojis, no long explanations.
-9. Do NOT show the question as text; always speak like a real teacher.
+// Dynamic System Instructions based on difficulty
+const GET_SYSTEM_INSTRUCTION = (difficulty: string) => `
+You are "Mimi", a friendly, caring AI teacher designed specially for small children.
+Your current difficulty setting is: ${difficulty.toUpperCase()}.
 
-TEACHING STYLE:
-- Ask simple questions from topics like numbers, colors, shapes, animals, fruits, daily activities.
-- One question at a time.
-- After the child answers, give a 1–2 line reaction and then ask the next question.
+CORE RULES (ALL LEVELS):
+1. Speak softly, kindly, and encouragingly.
+2. Never mention that you are an AI.
+3. Always praise the child gently, even if the answer is wrong.
+4. IMPORTANT: When the child answers a question, you MUST FIRST call the tool "reportEvaluation".
+   - Set "isCorrect" to true or false.
+   - Set "topic" to the subject of the question (e.g., "Colors", "Counting").
+   - Call the tool IMMEDIATELY after understanding the child's answer.
+   - AFTER calling the tool, speak your verbal response (praise/hint + next question).
+5. Always ask the next simple question after answering the child.
+6. NO text formatting, no emojis, no long explanations.
+7. YOUR OUTPUT MUST BE SPOKEN AUDIO ONLY.
+
+LEVEL SPECIFIC GUIDELINES:
+
+${difficulty === 'Easy' ? `
+TARGET: Ages 4-5
+TOPICS: Basic Colors, Animal Sounds, Counting (1-5), Simple Fruits/Foods.
+STYLE: Ultra-short sentences (5-8 words). Very simple vocabulary.
+HINTS: Give the answer directly or the first sound (e.g., "It starts with B...").
+` : difficulty === 'Medium' ? `
+TARGET: Ages 6-7
+TOPICS: Shapes, Simple Addition (1+1, 2+2), Days of the Week, Weather, Opposites (Hot/Cold).
+STYLE: Short sentences (8-12 words). Conversational but simple.
+HINTS: Describe the object simply (e.g., "It is yellow and comes from a chicken").
+` : `
+TARGET: Ages 8-10
+TOPICS: Subtraction, Basic Science (Plants, Rain), Geography (Continents/Oceans), Telling Time.
+STYLE: Natural sentences (10-15 words).
+HINTS: Ask a guiding question to help them figure it out (e.g., "What do plants drink when they are thirsty?").
+`}
 
 EXAMPLE FLOW:
-Teacher: "Hi sweetie, ready to learn today? Here is your first question. What color is the sky?"
+Teacher: "Hi sweetie, ready? Here is your first question. What color is a banana?"
 Child answers.
-Teacher: "Good try! The sky is blue. Now tell me, how many fingers do you have on one hand?"
+[Tool Call: reportEvaluation(isCorrect: true, topic: "Colors")]
+Teacher: "Great job! A banana is yellow. Now, can you tell me what a cat says?"
+
+GOAL: Make the child feel safe, happy, and confident.
 `;
 
-export const useGeminiLive = () => {
+interface UseGeminiLiveProps {
+    onEvaluation?: (isCorrect: boolean, topic?: string) => void;
+}
+
+export const useGeminiLive = ({ onEvaluation }: UseGeminiLiveProps = {}) => {
   const [connectionState, setConnectionState] = useState<ConnectionState>(ConnectionState.DISCONNECTED);
   const [isMimiSpeaking, setIsMimiSpeaking] = useState(false);
   const [volume, setVolume] = useState(0); // For visualizer
@@ -49,9 +92,14 @@ export const useGeminiLive = () => {
   
   // Ref for the session promise to avoid stale closures
   const sessionPromiseRef = useRef<Promise<any> | null>(null);
+
+  // Ref for callback to avoid dependency issues in connect
+  const onEvaluationRef = useRef(onEvaluation);
   
-  // Ref for cleanup function
-  const cleanupRef = useRef<() => void>(() => {});
+  // Update ref when prop changes
+  useEffect(() => {
+    onEvaluationRef.current = onEvaluation;
+  }, [onEvaluation]);
 
   const disconnect = useCallback(() => {
     if (sessionPromiseRef.current) {
@@ -99,7 +147,7 @@ export const useGeminiLive = () => {
     setVolume(0);
   }, []);
 
-  const connect = useCallback(async () => {
+  const connect = useCallback(async (difficulty: string) => {
     try {
       setConnectionState(ConnectionState.CONNECTING);
 
@@ -128,7 +176,8 @@ export const useGeminiLive = () => {
           speechConfig: {
             voiceConfig: { prebuiltVoiceConfig: { voiceName: 'Kore' } }, // Kore is usually soft/friendly
           },
-          systemInstruction: SYSTEM_INSTRUCTION,
+          systemInstruction: GET_SYSTEM_INSTRUCTION(difficulty),
+          tools: [{ functionDeclarations: [evaluationTool] }],
         },
         callbacks: {
           onopen: () => {
@@ -168,6 +217,36 @@ export const useGeminiLive = () => {
             processor.connect(inputCtx.destination);
           },
           onmessage: async (message: LiveServerMessage) => {
+             // Handle Tool Calls (Sound Feedback & Progress)
+             if (message.toolCall) {
+                for (const fc of message.toolCall.functionCalls) {
+                    if (fc.name === 'reportEvaluation') {
+                        const isCorrect = fc.args['isCorrect'] as boolean;
+                        const topic = fc.args['topic'] as string | undefined;
+                        
+                        playFeedbackSound(isCorrect);
+                        
+                        // Notify parent component via callback
+                        if (onEvaluationRef.current) {
+                            onEvaluationRef.current(isCorrect, topic);
+                        }
+
+                        // Respond to the tool to let the model continue
+                        if (sessionPromiseRef.current) {
+                            sessionPromiseRef.current.then(session => {
+                                session.sendToolResponse({
+                                    functionResponses: {
+                                        id: fc.id,
+                                        name: fc.name,
+                                        response: { result: "ok" }
+                                    }
+                                });
+                            });
+                        }
+                    }
+                }
+             }
+
              // Handle Audio Output
              const base64Audio = message.serverContent?.modelTurn?.parts?.[0]?.inlineData?.data;
              

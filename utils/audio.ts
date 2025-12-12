@@ -24,7 +24,6 @@ export function encode(bytes: Uint8Array): string {
   }
   return btoa(binary);
 }
-
 /**
  * Converts raw Float32 audio data (from Web Audio API) into the PCM format
  * expected by the Gemini Live API.
