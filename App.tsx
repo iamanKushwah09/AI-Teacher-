@@ -12,8 +12,16 @@ const DEFAULT_PROGRESS: UserProgress = {
     completedTopics: []
 };
 
+// Define topics available per difficulty
+const TOPICS_BY_DIFFICULTY: Record<string, string[]> = {
+    'Easy': ['Colors', 'Animals', 'Numbers', 'Fruits'],
+    'Medium': ['Shapes', 'Math', 'Weather', 'Days'],
+    'Hard': ['Science', 'Geography', 'Time', 'Space']
+};
+
 const App: React.FC = () => {
   const [progress, setProgress] = useState<UserProgress>(DEFAULT_PROGRESS);
+  const [selectedTopic, setSelectedTopic] = useState<string | undefined>(undefined);
   const [hasLoaded, setHasLoaded] = useState(false);
 
   // Load progress on mount
@@ -58,7 +66,7 @@ const App: React.FC = () => {
   });
 
   const handleStart = () => {
-    connect(progress.difficulty);
+    connect(progress.difficulty, selectedTopic);
   };
 
   const handleStop = () => {
@@ -67,6 +75,15 @@ const App: React.FC = () => {
 
   const handleDifficultyChange = (level: string) => {
       setProgress(prev => ({ ...prev, difficulty: level }));
+      setSelectedTopic(undefined); // Reset topic when difficulty changes
+  };
+
+  const toggleTopic = (topic: string) => {
+      if (selectedTopic === topic) {
+          setSelectedTopic(undefined);
+      } else {
+          setSelectedTopic(topic);
+      }
   };
 
   // Prevent flash of default state before loading
@@ -117,12 +134,12 @@ const App: React.FC = () => {
             </div>
             <h2 className="text-2xl font-bold text-gray-800 mb-2">Hi! I'm Mimi.</h2>
             <p className="text-gray-600 mb-6 leading-relaxed text-sm sm:text-base">
-              Welcome back! You have <b>{progress.stars} stars</b>. <br/> Let's get more!
+              Welcome back! You have <b>{progress.stars} stars</b>. <br/> What do you want to learn?
             </p>
 
             {/* Difficulty Selector */}
-            <div className="mb-8">
-                <label className="block text-indigo-800 text-sm font-bold mb-3">Choose Difficulty</label>
+            <div className="mb-4">
+                <label className="block text-indigo-800 text-xs font-bold mb-2 uppercase tracking-wide">Age Level</label>
                 <div className="grid grid-cols-3 gap-2">
                     {['Easy', 'Medium', 'Hard'].map((level) => (
                         <button
@@ -138,11 +155,36 @@ const App: React.FC = () => {
                         </button>
                     ))}
                 </div>
-                <p className="text-xs text-indigo-400 mt-2 font-medium">
-                    {progress.difficulty === 'Easy' && 'For ages 4-5 (Colors, Animals)'}
-                    {progress.difficulty === 'Medium' && 'For ages 6-7 (Math, Weather)'}
-                    {progress.difficulty === 'Hard' && 'For ages 8-10 (Science, Geography)'}
-                </p>
+            </div>
+
+            {/* Topic Selector */}
+            <div className="mb-8">
+                 <label className="block text-indigo-800 text-xs font-bold mb-2 uppercase tracking-wide">Choose a Topic (Optional)</label>
+                 <div className="flex flex-wrap gap-2 justify-center">
+                    {TOPICS_BY_DIFFICULTY[progress.difficulty]?.map(topic => (
+                        <button
+                            key={topic}
+                            onClick={() => toggleTopic(topic)}
+                            className={`px-3 py-1.5 rounded-full text-xs font-bold border transition-all ${
+                                selectedTopic === topic 
+                                ? 'bg-pink-400 text-white border-pink-400 shadow-sm scale-105' 
+                                : 'bg-white text-gray-500 border-gray-200 hover:border-pink-200'
+                            }`}
+                        >
+                            {topic}
+                        </button>
+                    ))}
+                    <button
+                        onClick={() => setSelectedTopic(undefined)}
+                        className={`px-3 py-1.5 rounded-full text-xs font-bold border transition-all ${
+                            selectedTopic === undefined
+                            ? 'bg-pink-400 text-white border-pink-400 shadow-sm'
+                            : 'bg-white text-gray-500 border-gray-200 hover:border-pink-200'
+                        }`}
+                    >
+                        Mix
+                    </button>
+                 </div>
             </div>
 
             <button
@@ -184,6 +226,12 @@ const App: React.FC = () => {
             
             <div className="bg-white/40 p-10 sm:p-12 rounded-[3rem] backdrop-blur-md shadow-inner border border-white/50 relative">
                 {/* Topic Bubble */}
+                {selectedTopic && (
+                    <div className="absolute -top-4 left-0 bg-pink-400 shadow-md rounded-full px-3 py-1 text-xs text-white font-bold border border-pink-200">
+                         Topic: {selectedTopic}
+                    </div>
+                )}
+                {/* Last Correct Topic */}
                 {progress.completedTopics.length > 0 && (
                     <div className="absolute -top-4 right-0 bg-white shadow-md rounded-full px-3 py-1 text-xs text-indigo-500 font-bold border border-indigo-100 animate-bounce" style={{animationDuration: '3s'}}>
                          Last: {progress.completedTopics[progress.completedTopics.length - 1]}

@@ -24,10 +24,11 @@ const evaluationTool: FunctionDeclaration = {
   },
 };
 
-// Dynamic System Instructions based on difficulty
-const GET_SYSTEM_INSTRUCTION = (difficulty: string) => `
+// Dynamic System Instructions based on difficulty and optional focus topic
+const GET_SYSTEM_INSTRUCTION = (difficulty: string, focusTopic?: string) => `
 You are "Mimi", a friendly, caring AI teacher designed specially for small children.
 Your current difficulty setting is: ${difficulty.toUpperCase()}.
+${focusTopic ? `CURRENT LESSON TOPIC: "${focusTopic}".` : ''}
 
 CORE RULES (ALL LEVELS):
 1. Speak softly, kindly, and encouragingly.
@@ -35,12 +36,13 @@ CORE RULES (ALL LEVELS):
 3. Always praise the child gently, even if the answer is wrong.
 4. IMPORTANT: When the child answers a question, you MUST FIRST call the tool "reportEvaluation".
    - Set "isCorrect" to true or false.
-   - Set "topic" to the subject of the question (e.g., "Colors", "Counting").
+   - Set "topic" to ${focusTopic ? `"${focusTopic}"` : 'the subject of the question (e.g., "Colors", "Counting")'}.
    - Call the tool IMMEDIATELY after understanding the child's answer.
    - AFTER calling the tool, speak your verbal response (praise/hint + next question).
 5. Always ask the next simple question after answering the child.
 6. NO text formatting, no emojis, no long explanations.
 7. YOUR OUTPUT MUST BE SPOKEN AUDIO ONLY.
+${focusTopic ? `8. RESTRICTION: You must ONLY ask questions related to "${focusTopic}". Do not change the subject.` : ''}
 
 LEVEL SPECIFIC GUIDELINES:
 
@@ -64,7 +66,7 @@ HINTS: Ask a guiding question to help them figure it out (e.g., "What do plants 
 EXAMPLE FLOW:
 Teacher: "Hi sweetie, ready? Here is your first question. What color is a banana?"
 Child answers.
-[Tool Call: reportEvaluation(isCorrect: true, topic: "Colors")]
+[Tool Call: reportEvaluation(isCorrect: true, topic: "${focusTopic || 'Colors'}")]
 Teacher: "Great job! A banana is yellow. Now, can you tell me what a cat says?"
 
 GOAL: Make the child feel safe, happy, and confident.
@@ -147,7 +149,7 @@ export const useGeminiLive = ({ onEvaluation }: UseGeminiLiveProps = {}) => {
     setVolume(0);
   }, []);
 
-  const connect = useCallback(async (difficulty: string) => {
+  const connect = useCallback(async (difficulty: string, focusTopic?: string) => {
     try {
       setConnectionState(ConnectionState.CONNECTING);
 
@@ -176,7 +178,7 @@ export const useGeminiLive = ({ onEvaluation }: UseGeminiLiveProps = {}) => {
           speechConfig: {
             voiceConfig: { prebuiltVoiceConfig: { voiceName: 'Kore' } }, // Kore is usually soft/friendly
           },
-          systemInstruction: GET_SYSTEM_INSTRUCTION(difficulty),
+          systemInstruction: GET_SYSTEM_INSTRUCTION(difficulty, focusTopic),
           tools: [{ functionDeclarations: [evaluationTool] }],
         },
         callbacks: {
@@ -222,7 +224,8 @@ export const useGeminiLive = ({ onEvaluation }: UseGeminiLiveProps = {}) => {
                 for (const fc of message.toolCall.functionCalls) {
                     if (fc.name === 'reportEvaluation') {
                         const isCorrect = fc.args['isCorrect'] as boolean;
-                        const topic = fc.args['topic'] as string | undefined;
+                        // Use the provided topic if available, otherwise fall back to reported topic
+                        let topic = fc.args['topic'] as string | undefined;
                         
                         playFeedbackSound(isCorrect);
                         
